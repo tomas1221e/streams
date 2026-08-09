@@ -7,7 +7,7 @@ from config import MAX_RETRIES, RETRY_DELAY, HEARTBEAT_INTERVAL
 from core.database import (
     add_log, get_channel, get_output, list_channels, list_outputs
 )
-from core.ffmpeg_utils import build_ffmpeg_command, generate_preview, probe
+from core.ffmpeg_utils import build_ffmpeg_command, generate_preview,
 
 
 class ProcessManager:

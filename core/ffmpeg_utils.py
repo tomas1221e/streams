@@ -118,7 +118,7 @@ def generate_preview(source, logo_settings=None):
 
     except (subprocess.TimeoutExpired, Exception):
         return None
-=======
+
 import os
 import shlex
 import subprocess
