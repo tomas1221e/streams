@@ -10,7 +10,7 @@ from core.database import (
     delete_channel, list_outputs, get_output, create_output, update_output,
     delete_output, get_logs
 )
-from core.stream_manager import manager,
+from core.stream_manager import manager, autostart
 
 app = Flask(__name__, static_folder=STATIC_DIR, template_folder=TEMPLATES_DIR)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
