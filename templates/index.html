@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Stream Manager V2</title>
+  <title>Stream Manager V3</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -11,7 +11,7 @@
   <header class="topbar">
     <div>
       <div class="eyebrow">FFMPEG CONTROL PANEL</div>
-      <h1>Stream Manager <span>V2</span></h1>
+      <h1>Stream Manager <span>V3</span></h1>
     </div>
     <button class="btn primary" onclick="openChannelModal()">＋ قناة جديدة</button>
   </header>
@@ -25,19 +25,14 @@
 
   <main>
     <div class="section-head">
-      <div>
-        <h2>القنوات</h2>
-        <p>تحكم بالمصادر والمخارج والمعالجة من مكان واحد.</p>
-      </div>
-      <button class="btn ghost" onclick="loadAll()">↻ تحديث</button>
+      <div><h2>القنوات</h2><p>تحكم بالمصادر والمخارج والمفاتيح والمعالجة.</p></div>
+      <button class="btn ghost" onclick="loadAll(true)">↻ تحديث</button>
     </div>
     <div id="channels" class="channels"></div>
   </main>
 
   <section class="logs-panel">
-    <div class="section-head">
-      <div><h2>سجل النظام</h2><p>آخر أحداث FFmpeg والاتصالات.</p></div>
-    </div>
+    <div class="section-head"><div><h2>سجل النظام</h2><p>آخر أحداث FFmpeg والاتصالات.</p></div></div>
     <pre id="logs">لا توجد سجلات.</pre>
   </section>
 </div>
@@ -48,10 +43,9 @@
       <h2 id="modalTitle">قناة جديدة</h2>
       <button class="icon" onclick="closeModal()">×</button>
     </div>
-    <div id="modalBody"></div>
+    <div id="modalBody" class="modal-body"></div>
   </div>
 </div>
-
 <script src="/static/script.js"></script>
 </body>
 </html>

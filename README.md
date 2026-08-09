@@ -1,47 +1,43 @@
-# Stream Manager V2
+# Streams Manager V3
 
-نسخة مطورة فوق مشروع streams الأصلي.
+This version is based on the current `tomas1221e/streams` structure and keeps the same Flask + SQLite + FFmpeg approach while adding:
 
-## المزايا
-- SQLite للحفظ الدائم.
-- Channels مستقلة عن Outputs.
-- أكثر من Output لكل قناة.
-- Start / Stop / Restart لكل Output.
-- Start/Stop لكل القناة.
-- Stream Key منفصل عن Server URL.
-- Modes: COPY / VIDEO COPY + AUDIO / FULL TRANSCODE.
-- H.264 / H.265 / NVENC / QSV / AMF كخيارات.
-- Resolution / FPS / Bitrate / Preset / GOP / Profile / Level / Pixel Format / Tune.
-- Audio codec / bitrate / sample rate / channels.
-- Extra FFmpeg arguments.
-- Logo overlay.
-- Preview.
-- FFprobe.
-- Logs محفوظة في SQLite.
-- Auto reconnect.
-- Auto start بعد إعادة تشغيل البرنامج.
+- Quick Stream Key change from the main dashboard.
+- Output creation with the previous output's settings.
+- Separate "same settings" and "new settings" output buttons.
+- Reduced output form: common settings are selects instead of many free-text fields.
+- Sticky modal header so the X button remains visible while scrolling.
+- Faster dashboard refresh using one `/api/state` request.
+- Faster visual feedback when starting/restarting outputs.
+- Optional video enhancement filters:
+  - Sharpen
+  - Denoise
+  - Deblock
+  - Brightness
+  - Contrast
+  - Saturation
+  - Gamma
+  - Scaling
+- Quality presets: Balanced, Football, Clean, Sharp, High Quality, Custom.
+- Existing SQLite databases are migrated automatically with new optional columns.
 
-## التشغيل
+## Install
 
-1. تأكد أن Python 3.10+ وFFmpeg مثبتان.
-2. ثبت المتطلبات:
-   pip install -r requirements.txt
-3. شغل:
-   python app.py
-4. افتح:
-   http://YOUR_SERVER_IP:5000
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python app.py
+```
 
-## مهم
-إذا كنت على Linux:
-sudo apt update
-sudo apt install ffmpeg python3 python3-pip
+FFmpeg and ffprobe must be installed and available in PATH.
 
-## COPY
-COPY مناسب فقط عندما تكون codecs/الحاوية متوافقة مع المنصة المستهدفة.
-إذا وضعت Logo، سيضطر الفيديو إلى إعادة الترميز.
+## Important
 
-## Extra Args
-يمكنك وضع خيارات FFmpeg إضافية، مثل:
--maxrate 3000k -bufsize 6000k
+`COPY` mode intentionally does not apply video filters. Filters require video processing/re-encoding.
 
-لا تضع `-i` أو رابط output داخل Extra Args.
+If you already have `data/streams.db`, keep it. The application adds the new columns automatically.
+
+Open:
+
+http://SERVER_IP:5000

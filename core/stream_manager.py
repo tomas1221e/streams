@@ -1,18 +1,16 @@
 import subprocess
 import threading
 import time
-from collections import defaultdict, deque
+from collections import defaultdict
 
 from config import MAX_RETRIES, RETRY_DELAY, HEARTBEAT_INTERVAL
-from core.database import (
-    add_log, get_channel, get_output, list_channels, list_outputs
-)
+from core.database import add_log, get_channel, get_output, list_channels, list_outputs
 from core.ffmpeg_utils import build_ffmpeg_command, generate_preview, probe
 
 
 class ProcessManager:
     def __init__(self):
-        self.processes = {}  # output_id -> Popen
+        self.processes = {}
         self.threads = {}
         self.retries = defaultdict(int)
         self.started_at = {}
@@ -34,51 +32,36 @@ class ProcessManager:
             return False, "Channel not found"
         if not output["enabled"]:
             return False, "Output is disabled"
-
         with self.lock:
             existing = self.processes.get(output_id)
             if existing and existing.poll() is None:
                 return True, "Already running"
             if reset_retries:
                 self.retries[output_id] = 0
-            self._launch_locked(channel, output)
-        return True, "started"
+            return self._launch_locked(channel, output)
 
     def _launch_locked(self, channel, output):
-        output_id = output["id"]
-        channel_id = channel["id"]
-
+        output_id, channel_id = output["id"], channel["id"]
         cmd = build_ffmpeg_command(channel, output)
         self.log("INFO", f"Starting {output['name']} | {' '.join(cmd)}", channel_id, output_id)
-
         try:
             proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                text=True, bufsize=1
             )
         except Exception as exc:
             self.log("ERROR", f"FFmpeg launch failed: {exc}", channel_id, output_id)
-            return
-
+            return False, str(exc)
         self.processes[output_id] = proc
         self.started_at[output_id] = time.time()
-        self.metrics[output_id] = {
-            "pid": proc.pid,
-            "uptime": 0,
-            "returncode": None,
-        }
-
+        self.metrics[output_id] = {"pid": proc.pid, "uptime": 0, "returncode": None}
         thread = threading.Thread(
-            target=self._watch_output,
-            args=(channel_id, output_id, proc),
-            daemon=True,
+            target=self._watch_output, args=(channel_id, output_id, proc), daemon=True
         )
         self.threads[output_id] = thread
         thread.start()
         self.log("INFO", f"Output started (PID {proc.pid})", channel_id, output_id)
+        return True, "started"
 
     def _watch_output(self, channel_id, output_id, proc):
         try:
@@ -91,7 +74,6 @@ class ProcessManager:
                     self.log("ERROR", line, channel_id, output_id)
                 elif "warning" in low:
                     self.log("WARNING", line, channel_id, output_id)
-                # Keep FFmpeg's useful progress/connection messages without flooding DB.
                 elif any(x in low for x in ("frame=", "speed=", "connected", "opening")):
                     self.log("INFO", line, channel_id, output_id)
         finally:
@@ -99,13 +81,10 @@ class ProcessManager:
             with self.lock:
                 self.metrics.setdefault(output_id, {})["returncode"] = rc
                 self.processes.pop(output_id, None)
-
             output = get_output(output_id)
             if not output:
                 return
-
             self.log("WARNING", f"Output exited with code {rc}", channel_id, output_id)
-
             with self.lock:
                 retries = self.retries.get(output_id, 0)
                 if retries < MAX_RETRIES and output["enabled"]:
@@ -113,14 +92,10 @@ class ProcessManager:
                     retry_no = retries + 1
                 else:
                     retry_no = None
-
             if retry_no is not None:
-                self.log(
-                    "WARNING",
-                    f"Auto reconnect {retry_no}/{MAX_RETRIES} in {RETRY_DELAY}s",
-                    channel_id,
-                    output_id,
-                )
+                self.log("WARNING",
+                         f"Auto reconnect {retry_no}/{MAX_RETRIES} in {RETRY_DELAY}s",
+                         channel_id, output_id)
                 time.sleep(RETRY_DELAY)
                 self.start_output(output_id, reset_retries=False)
             else:
@@ -134,7 +109,7 @@ class ProcessManager:
             self.retries[output_id] = MAX_RETRIES + 1
             try:
                 proc.terminate()
-                proc.wait(timeout=3)
+                proc.wait(timeout=2)
             except Exception:
                 try:
                     proc.kill()
@@ -142,7 +117,6 @@ class ProcessManager:
                     pass
             self.processes.pop(output_id, None)
             self.started_at.pop(output_id, None)
-
         output = get_output(output_id)
         if output:
             self.log("INFO", "Output stopped manually", output["channel_id"], output_id)
@@ -154,9 +128,8 @@ class ProcessManager:
         return self.start_output(output_id, reset_retries=False)
 
     def start_channel(self, channel_id):
-        outputs = list_outputs(channel_id)
         results = []
-        for output in outputs:
+        for output in list_outputs(channel_id):
             if output["enabled"]:
                 results.append((output["id"], self.start_output(output["id"])[0]))
         return results
@@ -165,15 +138,10 @@ class ProcessManager:
         for output in list_outputs(channel_id):
             self.stop_output(output["id"])
 
-    def channel_running(self, channel_id):
-        return any(
-            self.is_running(o["id"]) for o in list_outputs(channel_id)
-        )
-
     def is_running(self, output_id):
         with self.lock:
-            proc = self.processes.get(output_id)
-            return bool(proc and proc.poll() is None)
+            p = self.processes.get(output_id)
+            return bool(p and p.poll() is None)
 
     def status(self):
         result = {}
@@ -182,19 +150,18 @@ class ProcessManager:
             for output in list_outputs(channel["id"]):
                 running = self.is_running(output["id"])
                 started = self.started_at.get(output["id"])
-                uptime = int(time.time() - started) if started and running else 0
                 outputs.append({
                     **output,
                     "stream_key": "••••••••" if output["stream_key"] else "",
+                    "has_key": bool(output["stream_key"]),
                     "status": "running" if running else "stopped",
-                    "uptime": uptime,
+                    "uptime": int(time.time() - started) if started and running else 0,
                     "pid": self.metrics.get(output["id"], {}).get("pid"),
                     "returncode": self.metrics.get(output["id"], {}).get("returncode"),
                     "retries": self.retries.get(output["id"], 0),
                 })
             result[channel["id"]] = {
-                **channel,
-                "enabled": bool(channel["enabled"]),
+                **channel, "enabled": bool(channel["enabled"]),
                 "auto_start": bool(channel["auto_start"]),
                 "running": any(x["status"] == "running" for x in outputs),
                 "outputs": outputs,
@@ -205,31 +172,21 @@ class ProcessManager:
         channel = get_channel(channel_id)
         if not channel:
             return None
-        image = generate_preview(
-            channel["source"],
-            {
-                "path": channel["logo_path"],
-                "position": channel["logo_position"],
-                "scale": channel["logo_scale"],
-            },
-        )
+        image = generate_preview(channel["source"], {
+            "path": channel["logo_path"],
+            "position": channel["logo_position"],
+            "scale": channel["logo_scale"],
+        })
         self.preview_cache[channel_id] = image
         return image
 
     def probe(self, channel_id):
         channel = get_channel(channel_id)
-        if not channel:
-            return {"error": "Channel not found"}
-        return probe(channel["source"])
+        return probe(channel["source"]) if channel else {"error": "Channel not found"}
 
     def _heartbeat(self):
         while not self._stop_event.wait(HEARTBEAT_INTERVAL):
-            with self.lock:
-                current = list(self.processes.items())
-            for output_id, proc in current:
-                if proc.poll() is not None:
-                    # watcher thread handles reconnect
-                    continue
+            pass
 
 
 manager = ProcessManager()
