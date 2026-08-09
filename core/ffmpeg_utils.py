@@ -1,5 +1,4 @@
 import base64
-<<<<<<< Updated upstream
 from config import (
     DEFAULT_VIDEO_CODEC, DEFAULT_VIDEO_BITRATE, DEFAULT_FPS, DEFAULT_RESOLUTION,
     DEFAULT_AUDIO_CODEC, DEFAULT_AUDIO_BITRATE, DEFAULT_SAMPLE_RATE, DEFAULT_AUDIO_CHANNELS,
@@ -288,4 +287,4 @@ def probe(source):
         return json.loads(result.stdout or "{}")
     except Exception as exc:
         return {"error": str(exc)}
->>>>>>> Stashed changes
+
