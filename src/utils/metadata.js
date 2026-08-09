@@ -707,24 +707,26 @@ const createInputsOutputs = (sources, profiles, requireVideo = true) => {
 					y = 'H-h-20';
 				}
 
-			const baseGraph = filter.length !== 0
-				? `[${index}:${stream.stream}]${filter}[onside_base_${labelId}]`
-				: `[${index}:${stream.stream}]null[onside_base_${labelId}]`;
+				const baseGraph =
+					filter.length !== 0
+						? `[${index}:${stream.stream}]${filter}[onside_base_${labelId}]`
+						: `[${index}:${stream.stream}]null[onside_base_${labelId}]`;
 
-			complexFilter = `${baseGraph};${logoSource};[onside_base_${labelId}][onside_logo_${labelId}]overlay=x=${x}:y=${y}:eof_action=repeat:shortest=0[onside_video_${labelId}]`;
+				complexFilter = `${baseGraph};${logoSource};[onside_base_${labelId}][onside_logo_${labelId}]overlay=x=${x}:y=${y}:eof_action=repeat:shortest=0[onside_video_${labelId}]`;
 				videoMap = `[onside_video_${labelId}]`;
-			local.unshift('-filter_complex', complexFilter);
-		} else if (profile.video.filter.graph.length !== 0 || profile.video.encoder.mapping.filter.length !== 0) {
-			let filter = profile.video.filter.graph;
-			if (profile.video.encoder.mapping.filter.length !== 0) {
-				if (filter.length !== 0) {
-					filter += ',';
+				local.unshift('-filter_complex', complexFilter);
+			} else if (profile.video.filter.graph.length !== 0 || profile.video.encoder.mapping.filter.length !== 0) {
+				let filter = profile.video.filter.graph;
+				if (profile.video.encoder.mapping.filter.length !== 0) {
+					if (filter.length !== 0) {
+						filter += ',';
+					}
+
+					filter += profile.video.encoder.mapping.filter.join(',');
 				}
 
-				filter += profile.video.encoder.mapping.filter.join(',');
+				local.unshift('-filter:v', filter);
 			}
-
-			local.unshift('-filter:v', filter);
 		}
 
 		const options = videoMap.startsWith('[') ? [...local, '-map', videoMap] : ['-map', videoMap, ...local];

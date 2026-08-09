@@ -556,6 +556,8 @@ export default function Edit(props) {
 											type="video"
 											profile={$settings.profiles[0].video}
 											availableFilters={$skills.filter}
+											onStore={(name, data) => props.restreamer.UploadData(_channelid, name, data)}
+											coreAddress={props.restreamer.Address()}
 											onChange={handleFilter('video')}
 										/>
 									</Grid>

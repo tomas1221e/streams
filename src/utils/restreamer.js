@@ -2220,7 +2220,10 @@ class Restreamer {
 
 		const path = `/channels/${channel.channelid}/${name}`;
 
-		await this._uploadAssetData(path, data);
+		const uploaded = await this._uploadAssetData(path, data);
+		if (uploaded === false) {
+			return '';
+		}
 
 		return path;
 	}
@@ -3274,7 +3277,10 @@ class Restreamer {
 	}
 
 	async _uploadAssetData(remotePath, data) {
-		await this._call(this.api.DataPutFile, remotePath, data);
+		const [, err] = await this._call(this.api.DataPutFile, remotePath, data);
+		if (err !== null) {
+			return false;
+		}
 
 		return true;
 	}

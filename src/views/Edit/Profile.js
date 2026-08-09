@@ -580,6 +580,8 @@ export default function Profile(props) {
 													type="video"
 													profile={$profile.video}
 													availableFilters={props.skills.filter}
+													onStore={handleStore}
+													coreAddress={props.coreAddress}
 													onChange={handleFilter('video')}
 												/>
 											</Grid>

@@ -1,6 +1,5 @@
 import React from 'react';
 
-import { Trans } from '@lingui/macro';
 import Grid from '@mui/material/Grid';
 import Slider from '@mui/material/Slider';
 import Typography from '@mui/material/Typography';
@@ -89,14 +88,14 @@ function Filter(props) {
 	return (
 		<React.Fragment>
 			<Grid item xs={12}>
-				<Checkbox label={<Trans>Color correction</Trans>} checked={settings.enabled} onChange={() => update('enabled')(!settings.enabled)} />
+				<Checkbox label="Color correction" checked={settings.enabled} onChange={() => update('enabled')(!settings.enabled)} />
 			</Grid>
 			{settings.enabled && (
 				<React.Fragment>
-					<ValueSlider label={<Trans>Brightness</Trans>} value={settings.brightness} min={-1} max={1} step={0.01} onChange={update('brightness')} />
-					<ValueSlider label={<Trans>Contrast</Trans>} value={settings.contrast} min={0} max={2} step={0.01} onChange={update('contrast')} />
-					<ValueSlider label={<Trans>Saturation</Trans>} value={settings.saturation} min={0} max={3} step={0.01} onChange={update('saturation')} />
-					<ValueSlider label={<Trans>Hue</Trans>} value={settings.hue} min={-180} max={180} step={1} onChange={update('hue')} />
+					<ValueSlider label="Brightness" value={settings.brightness} min={-1} max={1} step={0.01} onChange={update('brightness')} />
+					<ValueSlider label="Contrast" value={settings.contrast} min={0} max={2} step={0.01} onChange={update('contrast')} />
+					<ValueSlider label="Saturation" value={settings.saturation} min={0} max={3} step={0.01} onChange={update('saturation')} />
+					<ValueSlider label="Hue" value={settings.hue} min={-180} max={180} step={1} onChange={update('hue')} />
 				</React.Fragment>
 			)}
 		</React.Fragment>

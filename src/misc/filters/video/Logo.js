@@ -1,6 +1,5 @@
 import React from 'react';
 
-import { Trans } from '@lingui/macro';
 import Grid from '@mui/material/Grid';
 import Slider from '@mui/material/Slider';
 import Typography from '@mui/material/Typography';
@@ -26,11 +25,6 @@ function init(initialState) {
 	return state;
 }
 
-function escapeMovieUrl(url) {
-	return String(url || '')
-		.replace(/\\/g, '\\\\')
-		.replace(/:/g, '\\:');
-}
 
 function createGraph(settings) {
 	settings = init(settings);
@@ -39,18 +33,18 @@ function createGraph(settings) {
 
 function Position(props) {
 	return (
-		<Select label={<Trans>Logo position</Trans>} value={props.value} onChange={props.onChange}>
+		<Select label="Logo position" value={props.value} onChange={props.onChange}>
 			<MenuItem value="top-left">
-				<Trans>Top left</Trans>
+				Top left
 			</MenuItem>
 			<MenuItem value="top-right">
-				<Trans>Top right</Trans>
+				Top right
 			</MenuItem>
 			<MenuItem value="bottom-left">
-				<Trans>Bottom left</Trans>
+				Bottom left
 			</MenuItem>
 			<MenuItem value="bottom-right">
-				<Trans>Bottom right</Trans>
+				Bottom right
 			</MenuItem>
 		</Select>
 	);
@@ -150,11 +144,12 @@ function Filter(props) {
 
 		try {
 			const path = await props.onStore(`onside-logo.${extension}`, data);
-			if (!path) {
-				throw new Error('Upload failed');
+			if (!path || typeof path !== 'string') {
+				throw new Error('Logo upload failed');
 			}
 
-			const url = `${coreAddress}${path}`;
+			const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+			const url = `${coreAddress}${normalizedPath}`;
 			const previewUrl = URL.createObjectURL(new Blob([data], { type: mimetype }));
 
 			if ($previewUrl && $previewUrl.startsWith('blob:')) {
@@ -200,7 +195,7 @@ function Filter(props) {
 		<React.Fragment>
 			<Grid item xs={12}>
 				<Checkbox
-					label={<Trans>Logo overlay</Trans>}
+					label="Logo overlay"
 					checked={settings.enabled}
 					disabled={!settings.logoUrl}
 					onChange={() => handleChange({ ...settings, enabled: !settings.enabled })}
@@ -233,7 +228,7 @@ function Filter(props) {
 					</Grid>
 					<Grid item xs={12} md={6}>
 						<Typography variant="body2">
-							<Trans>Logo size</Trans>
+							Logo size
 						</Typography>
 						<Slider
 							value={Number(settings.size)}
@@ -247,7 +242,7 @@ function Filter(props) {
 					</Grid>
 					<Grid item xs={12}>
 						<Typography variant="body2">
-							<Trans>Logo opacity</Trans>
+							Logo opacity
 						</Typography>
 						<Slider
 							value={Number(settings.opacity)}
