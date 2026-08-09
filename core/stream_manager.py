@@ -1,244 +1,247 @@
 import subprocess
 import threading
 import time
-import copy
-import logging
-from concurrent.futures import ThreadPoolExecutor
-from collections import deque
+from collections import defaultdict, deque
 
-from config import MAX_RETRIES, HEARTBEAT_INTERVAL
-from core.ffmpeg_utils import build_ffmpeg_command, generate_preview
+from config import MAX_RETRIES, RETRY_DELAY, HEARTBEAT_INTERVAL
+from core.database import (
+    add_log, get_channel, get_output, list_channels, list_outputs
+)
+from core.ffmpeg_utils import build_ffmpeg_command, generate_preview, probe
 
-# إعداد نظام السجلات (Logs) المخزن في الذاكرة لعرضه بالواجهة
-class LogBuffer:
-    def __init__(self, max_lines=200):
-        self.buffer = deque(maxlen=max_lines)
-        self.lock = threading.Lock()
-    
-    def add(self, level, message):
+
+class ProcessManager:
+    def __init__(self):
+        self.processes = {}  # output_id -> Popen
+        self.threads = {}
+        self.retries = defaultdict(int)
+        self.started_at = {}
+        self.lock = threading.RLock()
+        self.preview_cache = {}
+        self.metrics = {}
+        self._stop_event = threading.Event()
+        threading.Thread(target=self._heartbeat, daemon=True).start()
+
+    def log(self, level, message, channel_id=None, output_id=None):
+        add_log(level, message, channel_id, output_id)
+
+    def start_output(self, output_id, reset_retries=True):
+        output = get_output(output_id)
+        if not output:
+            return False, "Output not found"
+        channel = get_channel(output["channel_id"])
+        if not channel:
+            return False, "Channel not found"
+        if not output["enabled"]:
+            return False, "Output is disabled"
+
         with self.lock:
-            self.buffer.append(f"[{level}] {message}")
-    
-    def get_all(self):
-        with self.lock:
-            return list(self.buffer)
+            existing = self.processes.get(output_id)
+            if existing and existing.poll() is None:
+                return True, "Already running"
+            if reset_retries:
+                self.retries[output_id] = 0
+            self._launch_locked(channel, output)
+        return True, "started"
 
-# إنشاء كائن السجلات العام
-system_logs = LogBuffer()
+    def _launch_locked(self, channel, output):
+        output_id = output["id"]
+        channel_id = channel["id"]
 
-# إعداد الـ Logger الداخلي
-logger = logging.getLogger('StreamManager')
-logger.setLevel(logging.INFO)
+        cmd = build_ffmpeg_command(channel, output)
+        self.log("INFO", f"Starting {output['name']} | {' '.join(cmd)}", channel_id, output_id)
 
-# حالة القنوات (لكل مفتاح)
-# structure: {
-#   'key': {
-#       'source': 'url',
-#       'status': 'stopped' | 'running' | 'error' | 'starting',
-#       'process': None (Popen object),
-#       'thread': None,
-#       'retries': 0,
-#       'video_settings': {...},
-#       'audio_settings': {...},
-#       'logo_settings': {...},
-#       'preview': 'base64_image' or None
-#   }
-# }
-channels = {}
-channels_lock = threading.Lock()
-executor = ThreadPoolExecutor(max_workers=10)
-
-def get_channels_status():
-    """إرجاع نسخة آمنة من حالة جميع القنوات للواجهة"""
-    with channels_lock:
-        # نحذف الـ Process و Thread من النسخة لأنها غير قابلة للـ JSON
-        safe_status = {}
-        for key, data in channels.items():
-            safe_status[key] = {
-                'source': data.get('source'),
-                'status': data.get('status', 'stopped'),
-                'retries': data.get('retries', 0),
-                'preview': data.get('preview'),  # قد يكون كبيراً، لكننا نرسله
-                'video': data.get('video_settings'),
-                'audio': data.get('audio_settings'),
-                'logo': data.get('logo_settings', {}).get('path') is not None
-            }
-        return safe_status
-
-def add_channel(key, source, video_settings, audio_settings, logo_settings):
-    """إضافة قناة جديدة (أو تحديث قناة موجودة) وبدء تشغيلها"""
-    with channels_lock:
-        # إذا كانت موجودة، نوقفها أولاً
-        if key in channels:
-            _stop_channel_unsafe(key)
-        
-        channels[key] = {
-            'source': source,
-            'status': 'starting',
-            'process': None,
-            'thread': None,
-            'retries': 0,
-            'video_settings': video_settings,
-            'audio_settings': audio_settings,
-            'logo_settings': logo_settings,
-            'preview': None
-        }
-    
-    # بدء تشغيل القناة في خيط منفصل
-    future = executor.submit(_run_stream, key)
-    # نربط الـ future بالـ channel لمتابعته (اختياري)
-    return True
-
-def _run_stream(key):
-    """الخيط الرئيسي لتشغيل وبث قناة معينة مع إعادة محاولة ذكية"""
-    while True:
-        with channels_lock:
-            if key not in channels:
-                return  # تم حذف القناة
-            data = channels[key]
-            source = data['source']
-            video_settings = data['video_settings']
-            audio_settings = data['audio_settings']
-            logo_settings = data['logo_settings']
-            data['status'] = 'starting'
-            system_logs.add('INFO', f"جاري تشغيل القناة {key} ...")
-
-        # بناء الأمر
-        cmd = build_ffmpeg_command(source, key, video_settings, audio_settings, logo_settings)
-        
-        # تشغيل العملية
         try:
-            # استخدام CREATE_NO_WINDOW في Windows لتجنب ظهور نافذة (اختياري)
             proc = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
-                universal_newlines=True,
-                bufsize=1
+                text=True,
+                bufsize=1,
             )
-            
-            # تحديث الحالة
-            with channels_lock:
-                if key in channels:
-                    channels[key]['process'] = proc
-                    channels[key]['status'] = 'running'
-                    channels[key]['retries'] = 0
-                    # تحديث المعاينة في الخلفية (بدون تعطيل الخيط)
-                    threading.Thread(target=_update_preview, args=(key,), daemon=True).start()
-            
-            system_logs.add('INFO', f"✅ بدأ بث القناة {key} بنجاح.")
-            
-            # مراقبة العملية أثناء التشغيل (قراءة stderr لتسجيل الأخطاء)
+        except Exception as exc:
+            self.log("ERROR", f"FFmpeg launch failed: {exc}", channel_id, output_id)
+            return
+
+        self.processes[output_id] = proc
+        self.started_at[output_id] = time.time()
+        self.metrics[output_id] = {
+            "pid": proc.pid,
+            "uptime": 0,
+            "returncode": None,
+        }
+
+        thread = threading.Thread(
+            target=self._watch_output,
+            args=(channel_id, output_id, proc),
+            daemon=True,
+        )
+        self.threads[output_id] = thread
+        thread.start()
+        self.log("INFO", f"Output started (PID {proc.pid})", channel_id, output_id)
+
+    def _watch_output(self, channel_id, output_id, proc):
+        try:
             for line in proc.stderr:
+                line = line.strip()
                 if not line:
                     continue
-                # تسجيل الأخطاء التحذيرية فقط
-                if 'error' in line.lower() or 'failed' in line.lower():
-                    system_logs.add('ERROR', f"[{key}] {line.strip()}")
+                low = line.lower()
+                if "error" in low or "failed" in low or "invalid" in low:
+                    self.log("ERROR", line, channel_id, output_id)
+                elif "warning" in low:
+                    self.log("WARNING", line, channel_id, output_id)
+                # Keep FFmpeg's useful progress/connection messages without flooding DB.
+                elif any(x in low for x in ("frame=", "speed=", "connected", "opening")):
+                    self.log("INFO", line, channel_id, output_id)
+        finally:
+            rc = proc.wait()
+            with self.lock:
+                self.metrics.setdefault(output_id, {})["returncode"] = rc
+                self.processes.pop(output_id, None)
+
+            output = get_output(output_id)
+            if not output:
+                return
+
+            self.log("WARNING", f"Output exited with code {rc}", channel_id, output_id)
+
+            with self.lock:
+                retries = self.retries.get(output_id, 0)
+                if retries < MAX_RETRIES and output["enabled"]:
+                    self.retries[output_id] = retries + 1
+                    retry_no = retries + 1
                 else:
-                    system_logs.add('INFO', f"[{key}] {line.strip()}")
-            
-            # إذا خرجنا من الحلقة، يعني أن العملية توقفت
-            proc.wait()
-            
-            # التحقق من سبب التوقف
-            with channels_lock:
-                if key not in channels:
-                    return
-                data = channels[key]
-                if data['status'] == 'stopped':
-                    system_logs.add('INFO', f"🛑 توقف بث القناة {key} يدويًا.")
-                    return
-                
-                # محاولة إعادة التشغيل
-                retries = data.get('retries', 0)
-                if retries < MAX_RETRIES:
-                    data['retries'] = retries + 1
-                    data['status'] = 'error'
-                    system_logs.add('WARNING', f"⚠️ توقف بث {key}، إعادة محاولة {retries+1}/{MAX_RETRIES} ...")
-                    time.sleep(5)  # انتظار قصير قبل إعادة المحاولة
-                    continue  # إعادة تشغيل الحلقة
-                else:
-                    data['status'] = 'error'
-                    system_logs.add('ERROR', f"❌ فشل بث {key} بعد {MAX_RETRIES} محاولات.")
-                    return
-                    
-        except Exception as e:
-            system_logs.add('ERROR', f"🔥 خطأ في تشغيل {key}: {str(e)}")
-            with channels_lock:
-                if key in channels:
-                    channels[key]['status'] = 'error'
-            time.sleep(5)
+                    retry_no = None
 
-def _update_preview(key):
-    """تحديث صورة المعاينة للقناة في الخلفية"""
-    with channels_lock:
-        if key not in channels:
-            return
-        data = channels[key]
-        source = data['source']
-        logo_settings = data.get('logo_settings')
-    
-    preview = generate_preview(source, logo_settings)
-    with channels_lock:
-        if key in channels:
-            channels[key]['preview'] = preview
+            if retry_no is not None:
+                self.log(
+                    "WARNING",
+                    f"Auto reconnect {retry_no}/{MAX_RETRIES} in {RETRY_DELAY}s",
+                    channel_id,
+                    output_id,
+                )
+                time.sleep(RETRY_DELAY)
+                self.start_output(output_id, reset_retries=False)
+            else:
+                self.log("ERROR", "Output stopped after retry limit", channel_id, output_id)
 
-def stop_channel(key):
-    """إيقاف قناة معينة"""
-    with channels_lock:
-        _stop_channel_unsafe(key)
-
-def _stop_channel_unsafe(key):
-    """إيقاف قناة (بدون قفل، يُستخدم داخليًا)"""
-    if key not in channels:
-        return
-    data = channels[key]
-    data['status'] = 'stopped'
-    proc = data.get('process')
-    if proc:
-        try:
-            proc.terminate()
-            proc.wait(timeout=3)
-        except:
+    def stop_output(self, output_id):
+        with self.lock:
+            proc = self.processes.get(output_id)
+            if not proc:
+                return False
+            self.retries[output_id] = MAX_RETRIES + 1
             try:
-                proc.kill()
-            except:
-                pass
-    data['process'] = None
-    system_logs.add('INFO', f"🛑 تم إيقاف القناة {key}.")
+                proc.terminate()
+                proc.wait(timeout=3)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            self.processes.pop(output_id, None)
+            self.started_at.pop(output_id, None)
 
-def delete_channel(key):
-    """حذف قناة نهائيًا"""
-    with channels_lock:
-        if key in channels:
-            _stop_channel_unsafe(key)
-            del channels[key]
-            system_logs.add('INFO', f"🗑️ تم حذف القناة {key}.")
+        output = get_output(output_id)
+        if output:
+            self.log("INFO", "Output stopped manually", output["channel_id"], output_id)
+        return True
 
-def get_logs():
-    """إرجاع السجلات من الذاكرة"""
-    return system_logs.get_all()
+    def restart_output(self, output_id):
+        self.stop_output(output_id)
+        self.retries[output_id] = 0
+        return self.start_output(output_id, reset_retries=False)
 
-# تشغيل خيط نبضات القلب (Heartbeat) لمراقبة العمليات الميتة
-def heartbeat_loop():
-    """خيط دوري للتأكد من أن العمليات ما زالت حية، وإعادة تشغيلها إذا لزم الأمر"""
-    while True:
-        time.sleep(HEARTBEAT_INTERVAL)
-        with channels_lock:
-            for key, data in list(channels.items()):
-                if data['status'] == 'running':
-                    proc = data.get('process')
-                    if proc is None:
-                        system_logs.add('WARNING', f"💔 العملية مفقودة للقناة {key}، إعادة تشغيل ...")
-                        # إعادة تشغيل
-                        threading.Thread(target=_run_stream, args=(key,), daemon=True).start()
-                    else:
-                        poll = proc.poll()
-                        if poll is not None:
-                            system_logs.add('WARNING', f"💔 العملية منتهية للقناة {key} (كود {poll})، إعادة تشغيل ...")
-                            # إعادة تشغيل
-                            threading.Thread(target=_run_stream, args=(key,), daemon=True).start()
+    def start_channel(self, channel_id):
+        outputs = list_outputs(channel_id)
+        results = []
+        for output in outputs:
+            if output["enabled"]:
+                results.append((output["id"], self.start_output(output["id"])[0]))
+        return results
 
-# بدء خيط النبض
-threading.Thread(target=heartbeat_loop, daemon=True).start()
+    def stop_channel(self, channel_id):
+        for output in list_outputs(channel_id):
+            self.stop_output(output["id"])
+
+    def channel_running(self, channel_id):
+        return any(
+            self.is_running(o["id"]) for o in list_outputs(channel_id)
+        )
+
+    def is_running(self, output_id):
+        with self.lock:
+            proc = self.processes.get(output_id)
+            return bool(proc and proc.poll() is None)
+
+    def status(self):
+        result = {}
+        for channel in list_channels():
+            outputs = []
+            for output in list_outputs(channel["id"]):
+                running = self.is_running(output["id"])
+                started = self.started_at.get(output["id"])
+                uptime = int(time.time() - started) if started and running else 0
+                outputs.append({
+                    **output,
+                    "stream_key": "••••••••" if output["stream_key"] else "",
+                    "status": "running" if running else "stopped",
+                    "uptime": uptime,
+                    "pid": self.metrics.get(output["id"], {}).get("pid"),
+                    "returncode": self.metrics.get(output["id"], {}).get("returncode"),
+                    "retries": self.retries.get(output["id"], 0),
+                })
+            result[channel["id"]] = {
+                **channel,
+                "enabled": bool(channel["enabled"]),
+                "auto_start": bool(channel["auto_start"]),
+                "running": any(x["status"] == "running" for x in outputs),
+                "outputs": outputs,
+            }
+        return result
+
+    def preview(self, channel_id):
+        channel = get_channel(channel_id)
+        if not channel:
+            return None
+        image = generate_preview(
+            channel["source"],
+            {
+                "path": channel["logo_path"],
+                "position": channel["logo_position"],
+                "scale": channel["logo_scale"],
+            },
+        )
+        self.preview_cache[channel_id] = image
+        return image
+
+    def probe(self, channel_id):
+        channel = get_channel(channel_id)
+        if not channel:
+            return {"error": "Channel not found"}
+        return probe(channel["source"])
+
+    def _heartbeat(self):
+        while not self._stop_event.wait(HEARTBEAT_INTERVAL):
+            with self.lock:
+                current = list(self.processes.items())
+            for output_id, proc in current:
+                if proc.poll() is not None:
+                    # watcher thread handles reconnect
+                    continue
+
+
+manager = ProcessManager()
+
+
+def autostart():
+    for channel in list_channels():
+        if channel["enabled"] and channel["auto_start"]:
+            for output in list_outputs(channel["id"]):
+                if output["enabled"] and output["auto_start"]:
+                    manager.start_output(output["id"])
+
+
+def get_status():
+    return manager.status()

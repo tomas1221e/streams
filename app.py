@@ -1,109 +1,209 @@
-from flask import Flask, request, jsonify, render_template, send_from_directory
 import os
-import json
 import time
 
-from config import HOST, PORT, STATIC_DIR, TEMPLATES_DIR, UPLOAD_FOLDER
-from core.stream_manager import (
-    add_channel, stop_channel, delete_channel, 
-    get_channels_status, get_logs
+from flask import Flask, jsonify, render_template, request
+from werkzeug.utils import secure_filename
+
+from config import HOST, PORT, STATIC_DIR, TEMPLATES_DIR, UPLOAD_FOLDER, MAX_UPLOAD_MB
+from core.database import (
+    init_db, list_channels, get_channel, create_channel, update_channel,
+    delete_channel, list_outputs, get_output, create_output, update_output,
+    delete_output, get_logs
 )
+from core.stream_manager import manager, autostart
 
 app = Flask(__name__, static_folder=STATIC_DIR, template_folder=TEMPLATES_DIR)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10MB للشعار
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
 
-# الصفحة الرئيسية
-@app.route('/')
+init_db()
+
+
+@app.route("/")
 def index():
-    return render_template('index.html')
+    return render_template("index.html")
 
-# رفع الشعار
-@app.route('/upload_logo', methods=['POST'])
+
+@app.route("/api/dashboard")
+def dashboard():
+    status = manager.status()
+    channels = list(status.values())
+    running = sum(1 for c in channels if c["running"])
+    outputs = sum(len(c["outputs"]) for c in channels)
+    running_outputs = sum(
+        1 for c in channels for o in c["outputs"] if o["status"] == "running"
+    )
+    return jsonify({
+        "channels": len(channels),
+        "running_channels": running,
+        "outputs": outputs,
+        "running_outputs": running_outputs,
+    })
+
+
+@app.route("/api/channels", methods=["GET"])
+def api_channels():
+    return jsonify(manager.status())
+
+
+@app.route("/api/channels", methods=["POST"])
+def api_create_channel():
+    data = request.get_json(silent=True) or {}
+    source = (data.get("source") or "").strip()
+    if not source:
+        return jsonify({"error": "المصدر مطلوب"}), 400
+    channel = create_channel(data)
+    if data.get("start"):
+        manager.start_channel(channel["id"])
+    return jsonify(manager.status()[channel["id"]]), 201
+
+
+@app.route("/api/channels/<channel_id>", methods=["GET", "PUT", "DELETE"])
+def api_channel(channel_id):
+    channel = get_channel(channel_id)
+    if not channel:
+        return jsonify({"error": "القناة غير موجودة"}), 404
+
+    if request.method == "GET":
+        return jsonify({
+            **channel,
+            "enabled": bool(channel["enabled"]),
+            "auto_start": bool(channel["auto_start"]),
+            "outputs": list_outputs(channel_id),
+        })
+
+    if request.method == "DELETE":
+        manager.stop_channel(channel_id)
+        delete_channel(channel_id)
+        return jsonify({"status": "deleted"})
+
+    data = request.get_json(silent=True) or {}
+    updated = update_channel(channel_id, data)
+    return jsonify(updated)
+
+
+@app.route("/api/channels/<channel_id>/start", methods=["POST"])
+def start_channel(channel_id):
+    if not get_channel(channel_id):
+        return jsonify({"error": "القناة غير موجودة"}), 404
+    manager.start_channel(channel_id)
+    return jsonify({"status": "started"})
+
+
+@app.route("/api/channels/<channel_id>/stop", methods=["POST"])
+def stop_channel(channel_id):
+    if not get_channel(channel_id):
+        return jsonify({"error": "القناة غير موجودة"}), 404
+    manager.stop_channel(channel_id)
+    return jsonify({"status": "stopped"})
+
+
+@app.route("/api/channels/<channel_id>/preview", methods=["POST"])
+def preview_channel(channel_id):
+    image = manager.preview(channel_id)
+    if not image:
+        return jsonify({"error": "تعذر الحصول على المعاينة"}), 400
+    return jsonify({"preview": image})
+
+
+@app.route("/api/channels/<channel_id>/probe", methods=["POST"])
+def probe_channel(channel_id):
+    return jsonify(manager.probe(channel_id))
+
+
+@app.route("/api/channels/<channel_id>/outputs", methods=["GET", "POST"])
+def api_outputs(channel_id):
+    if not get_channel(channel_id):
+        return jsonify({"error": "القناة غير موجودة"}), 404
+
+    if request.method == "GET":
+        return jsonify(list_outputs(channel_id))
+
+    data = request.get_json(silent=True) or {}
+    if not (data.get("server") or "").strip():
+        return jsonify({"error": "Server URL مطلوب"}), 400
+
+    output = create_output(channel_id, data)
+    if data.get("start"):
+        manager.start_output(output["id"])
+    return jsonify(output), 201
+
+
+@app.route("/api/outputs/<output_id>", methods=["GET", "PUT", "DELETE"])
+def api_output(output_id):
+    output = get_output(output_id)
+    if not output:
+        return jsonify({"error": "البث غير موجود"}), 404
+
+    if request.method == "GET":
+        return jsonify(output)
+
+    if request.method == "DELETE":
+        manager.stop_output(output_id)
+        delete_output(output_id)
+        return jsonify({"status": "deleted"})
+
+    data = request.get_json(silent=True) or {}
+    updated = update_output(output_id, data)
+    return jsonify(updated)
+
+
+@app.route("/api/outputs/<output_id>/start", methods=["POST"])
+def start_output(output_id):
+    ok, msg = manager.start_output(output_id)
+    return jsonify({"status": "started" if ok else "error", "message": msg}), (200 if ok else 400)
+
+
+@app.route("/api/outputs/<output_id>/stop", methods=["POST"])
+def stop_output(output_id):
+    manager.stop_output(output_id)
+    return jsonify({"status": "stopped"})
+
+
+@app.route("/api/outputs/<output_id>/restart", methods=["POST"])
+def restart_output(output_id):
+    ok, msg = manager.restart_output(output_id)
+    return jsonify({"status": "started" if ok else "error", "message": msg}), (200 if ok else 400)
+
+
+@app.route("/api/logs")
+def api_logs():
+    return jsonify(get_logs(
+        channel_id=request.args.get("channel_id"),
+        output_id=request.args.get("output_id"),
+        limit=min(int(request.args.get("limit", 300)), 1000),
+    ))
+
+
+@app.route("/upload_logo", methods=["POST"])
 def upload_logo():
-    if 'logo' not in request.files:
-        return jsonify({'error': 'لا يوجد ملف'}), 400
-    file = request.files['logo']
-    if file.filename == '':
-        return jsonify({'error': 'لم يتم اختيار ملف'}), 400
-    
-    # التحقق من الصيغة
-    if not file.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
-        return jsonify({'error': 'الصيغة غير مدعومة. استخدم PNG, JPG, WEBP'}), 400
-    
-    # حفظ الملف باسم ثابت لتسهيل الاستخدام (أو نستخدم اسم فريد)
-    filename = f"logo_{int(time.time())}.png"
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    file.save(filepath)
-    
-    return jsonify({'path': filepath, 'filename': filename})
+    file = request.files.get("logo")
+    if not file or not file.filename:
+        return jsonify({"error": "لم يتم اختيار ملف"}), 400
 
-# معاينة الشعار (بدون تشغيل بث)
-@app.route('/preview', methods=['POST'])
-def preview():
-    data = request.get_json()
-    source = data.get('source')
-    logo_settings = data.get('logo_settings')
-    
+    allowed = {".png", ".jpg", ".jpeg", ".webp"}
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in allowed:
+        return jsonify({"error": "الصيغة غير مدعومة"}), 400
+
+    filename = f"logo_{int(time.time() * 1000)}_{secure_filename(file.filename)}"
+    path = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(path)
+    return jsonify({"path": path, "filename": filename})
+
+
+@app.route("/preview", methods=["POST"])
+def legacy_preview():
+    data = request.get_json(silent=True) or {}
+    source = data.get("source")
     if not source:
-        return jsonify({'error': 'المصدر مطلوب'}), 400
-    
+        return jsonify({"error": "المصدر مطلوب"}), 400
     from core.ffmpeg_utils import generate_preview
-    preview_image = generate_preview(source, logo_settings)
-    
-    if preview_image:
-        return jsonify({'preview': preview_image})
-    else:
-        return jsonify({'error': 'تعذر الحصول على المعاينة. تأكد من صحة المصدر.'}), 400
+    preview = generate_preview(source, data.get("logo_settings"))
+    return jsonify({"preview": preview}) if preview else jsonify({"error": "فشل المعاينة"}), 400
 
-# إضافة/تحديث قناة
-@app.route('/channel', methods=['POST'])
-def manage_channel():
-    data = request.get_json()
-    key = data.get('key')
-    source = data.get('source')
-    action = data.get('action', 'start')  # start, stop, delete
-    
-    if not key:
-        return jsonify({'error': 'المفتاح (Key) مطلوب'}), 400
-    
-    if action == 'stop':
-        stop_channel(key)
-        return jsonify({'status': 'stopped'})
-    
-    if action == 'delete':
-        delete_channel(key)
-        return jsonify({'status': 'deleted'})
-    
-    # action == 'start' or update
-    if not source:
-        return jsonify({'error': 'رابط المصدر (Source) مطلوب'}), 400
-    
-    # استخراج الإعدادات
-    video_settings = data.get('video', {})
-    audio_settings = data.get('audio', {})
-    logo_settings = data.get('logo', {})
-    
-    # التأكد من وجود مسار الشعار
-    if logo_settings and 'path' in logo_settings:
-        if not os.path.exists(logo_settings['path']):
-            logo_settings = None  # تجاهل إذا كان الملف غير موجود
-    
-    add_channel(key, source, video_settings, audio_settings, logo_settings)
-    return jsonify({'status': 'started'})
 
-# جلب حالة جميع القنوات
-@app.route('/status')
-def status():
-    return jsonify(get_channels_status())
-
-# جلب السجلات (Logs)
-@app.route('/logs')
-def logs():
-    return jsonify(get_logs())
-
-# تشغيل الخادم
-if __name__ == '__main__':
-    print("🚀 تم تشغيل الخادم على http://localhost:5000")
-    print("📡 لوحة التحكم جاهزة!")
+if __name__ == "__main__":
+    autostart()
+    print(f"🚀 Stream Manager V2: http://localhost:{PORT}")
     app.run(host=HOST, port=PORT, debug=False, threaded=True)

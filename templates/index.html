@@ -1,143 +1,57 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ar" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>لوحة تحكم البث الاحترافية</title>
-    <link rel="stylesheet" href="/static/style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Stream Manager V2</title>
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="container">
-        <h1>🎥 لوحة تحكم البث المباشر</h1>
-        
-        <div class="grid">
-            <!-- العمود الأيسر: إضافة قناة وإعدادات -->
-            <div class="card">
-                <h2>➕ إضافة / تعديل قناة</h2>
-                <form id="channelForm">
-                    <div class="form-group">
-                        <label>🔑 المفتاح (Stream Key / RTMP URL)</label>
-                        <input type="text" id="streamKey" placeholder="مثال: rtmp://live.twitch.tv/app/..." required>
-                    </div>
-                    <div class="form-group">
-                        <label>📡 رابط المصدر (Source)</label>
-                        <input type="text" id="sourceUrl" placeholder="https://example.com/video.m3u8 أو rtsp://..." required>
-                    </div>
-                    
-                    <h3>⚙️ إعدادات الفيديو المتقدمة</h3>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>الدقة</label>
-                            <select id="resolution">
-                                <option value="1920x1080">1080p</option>
-                                <option value="1280x720" selected>720p</option>
-                                <option value="854x480">480p</option>
-                                <option value="640x360">360p</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>معدل الإطارات (FPS)</label>
-                            <select id="fps">
-                                <option value="60">60</option>
-                                <option value="30" selected>30</option>
-                                <option value="25">25</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>معدل البت (Bitrate)</label>
-                            <select id="videoBitrate">
-                                <option value="4500k">4500k (جودة عالية)</option>
-                                <option value="2500k">2500k (جودة متوسطة)</option>
-                                <option value="1000k" selected>1000k (جودة منخفضة)</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>كوديك الفيديو</label>
-                            <select id="videoCodec">
-                                <option value="libx264">H.264 (متوافق)</option>
-                                <option value="libx265">H.265 (كفاءة أعلى)</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <h3>🎵 إعدادات الصوت المتقدمة</h3>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>معدل البت الصوتي</label>
-                            <select id="audioBitrate">
-                                <option value="320k">320k (عالٍ)</option>
-                                <option value="192k" selected>192k (جيد)</option>
-                                <option value="128k">128k (اقتصادي)</option>
-                                <option value="64k">64k (منخفض)</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>معدل العينة (Sample Rate)</label>
-                            <select id="sampleRate">
-                                <option value="48000">48,000 Hz (جودة CD)</option>
-                                <option value="44100" selected>44,100 Hz (قياسي)</option>
-                                <option value="22050">22,050 Hz</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>القنوات</label>
-                            <select id="audioChannels">
-                                <option value="2">ستيريو (Stereo)</option>
-                                <option value="1" selected>مونو (Mono)</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <h3>🖼️ إضافة شعار (Logo) مع معاينة</h3>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>رفع الشعار</label>
-                            <input type="file" id="logoFile" accept="image/png,image/jpeg,image/webp">
-                            <small style="display:block; color:#aaa;">يفضل PNG بخلفية شفافة</small>
-                        </div>
-                        <div class="form-group">
-                            <label>موقع الشعار</label>
-                            <select id="logoPosition">
-                                <option value="top-left">أعلى اليسار</option>
-                                <option value="top-right" selected>أعلى اليمين</option>
-                                <option value="bottom-left">أسفل اليسار</option>
-                                <option value="bottom-right">أسفل اليمين</option>
-                                <option value="center">الوسط</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>حجم الشعار (نسبة مئوية)</label>
-                            <input type="number" id="logoScale" value="15" min="5" max="50" step="5">
-                            <small style="color:#aaa;">% من عرض الفيديو</small>
-                        </div>
-                    </div>
-                    
-                    <div style="display: flex; gap: 10px; margin-top: 10px;">
-                        <button type="button" id="previewBtn" class="btn btn-secondary">👁️ معاينة الشعار</button>
-                        <button type="submit" class="btn btn-primary">▶️ تشغيل البث</button>
-                    </div>
-                </form>
-                <div id="previewContainer" style="display:none; margin-top:15px; text-align:center;">
-                    <h4>📸 معاينة البث مع الشعار</h4>
-                    <img id="previewImage" src="" alt="معاينة" style="max-width:100%; border-radius:8px; border:1px solid #333;">
-                    <p id="previewError" style="color:#ff6b6b;"></p>
-                </div>
-            </div>
-
-            <!-- العمود الأيمن: حالة القنوات والسجلات -->
-            <div class="card">
-                <h2>📊 حالة القنوات</h2>
-                <div id="channelsStatus">
-                    <p style="color:#aaa;">لا توجد قنوات مفعلة</p>
-                </div>
-                <hr>
-                <h2>📜 سجل الأحداث (Logs)</h2>
-                <div id="logsContainer">
-                    <pre id="logsDisplay" style="background:#1a1a1a; padding:10px; border-radius:5px; max-height:300px; overflow-y:auto; font-size:12px; color:#eee;">⏳ في انتظار السجلات...</pre>
-                </div>
-            </div>
-        </div>
+<div class="app">
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">FFMPEG CONTROL PANEL</div>
+      <h1>Stream Manager <span>V2</span></h1>
     </div>
-    <script src="/static/script.js"></script>
+    <button class="btn primary" onclick="openChannelModal()">＋ قناة جديدة</button>
+  </header>
+
+  <section class="stats">
+    <div class="stat"><span>القنوات</span><b id="statChannels">0</b></div>
+    <div class="stat"><span>قنوات تعمل</span><b id="statRunning">0</b></div>
+    <div class="stat"><span>كل المخارج</span><b id="statOutputs">0</b></div>
+    <div class="stat"><span>مخارج تعمل</span><b id="statRunningOutputs">0</b></div>
+  </section>
+
+  <main>
+    <div class="section-head">
+      <div>
+        <h2>القنوات</h2>
+        <p>تحكم بالمصادر والمخارج والمعالجة من مكان واحد.</p>
+      </div>
+      <button class="btn ghost" onclick="loadAll()">↻ تحديث</button>
+    </div>
+    <div id="channels" class="channels"></div>
+  </main>
+
+  <section class="logs-panel">
+    <div class="section-head">
+      <div><h2>سجل النظام</h2><p>آخر أحداث FFmpeg والاتصالات.</p></div>
+    </div>
+    <pre id="logs">لا توجد سجلات.</pre>
+  </section>
+</div>
+
+<div id="modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2 id="modalTitle">قناة جديدة</h2>
+      <button class="icon" onclick="closeModal()">×</button>
+    </div>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<script src="/static/script.js"></script>
 </body>
 </html>
