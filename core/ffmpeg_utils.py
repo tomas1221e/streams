@@ -43,8 +43,187 @@ def output_url(output):
 
     return server + "/" + key
 
+def build_video_filters(output):
+    """
+    Build optional FFmpeg video filters.
+
+    All values are optional.
+    """
+
+    filters = []
+
+    # -----------------------------
+    # Brightness / Contrast / Gamma
+    # -----------------------------
+
+    brightness = float(output.get("brightness") or 0)
+
+    contrast = float(output.get("contrast") or 1)
+
+    saturation = float(
+        output.get("saturation") or 1
+    )
+
+    gamma = float(
+        output.get("gamma") or 1
+    )
+
+    if (
+        brightness != 0
+        or contrast != 1
+        or saturation != 1
+        or gamma != 1
+    ):
+        filters.append(
+            "eq="
+            f"brightness={brightness}:"
+            f"contrast={contrast}:"
+            f"saturation={saturation}:"
+            f"gamma={gamma}"
+        )
+
+    # -----------------------------
+    # Sharpen
+    # -----------------------------
+
+    sharpen = float(
+        output.get("sharpen") or 0
+    )
+
+    if sharpen > 0:
+
+        sharpen = min(
+            max(sharpen, 0),
+            5
+        )
+
+        filters.append(
+            f"unsharp=5:5:{sharpen}:5:5:0"
+        )
+
+    # -----------------------------
+    # Denoise
+    # -----------------------------
+
+    denoise = (
+        output.get("denoise") or "off"
+    ).lower()
+
+    if denoise == "light":
+
+        filters.append(
+            "hqdn3d=1.2:1.2:3:3"
+        )
+
+    elif denoise == "medium":
+
+        filters.append(
+            "hqdn3d=2:2:4:4"
+        )
+
+    elif denoise == "strong":
+
+        filters.append(
+            "hqdn3d=3:3:6:6"
+        )
+
+    # -----------------------------
+    # Deblock
+    # -----------------------------
+
+    deblock = (
+        output.get("deblock") or "off"
+    ).lower()
+
+    if deblock == "light":
+
+        filters.append(
+            "pp=hb/vb/dr"
+        )
+
+    elif deblock == "medium":
+
+        filters.append(
+            "pp=hb/vb/ha"
+        )
+
+    # -----------------------------
+    # Color Enhancement
+    # -----------------------------
+
+    color_boost = float(
+        output.get("color_boost") or 0
+    )
+
+    if color_boost > 0:
+
+        color_boost = min(
+            max(color_boost, 0),
+            2
+        )
+
+        filters.append(
+            f"colorbalance="
+            f"rs={color_boost}:"
+            f"gs={color_boost}:"
+            f"bs={color_boost}"
+        )
+
+    # -----------------------------
+    # Edge Enhancement
+    # -----------------------------
+
+    edge = (
+        output.get("edge_enhance")
+        or "off"
+    ).lower()
+
+    if edge == "light":
+
+        filters.append(
+            "edgedetect=low=0.1:high=0.4"
+        )
+
+    # -----------------------------
+    # Film Grain / Texture
+    # -----------------------------
+
+    grain = float(
+        output.get("grain") or 0
+    )
+
+    if grain > 0:
+
+        grain = min(
+            max(grain, 0),
+            10
+        )
+
+        filters.append(
+            f"noise="
+            f"alls={int(grain)}:"
+            f"allf=t"
+        )
+
+    # -----------------------------
+    # Lanczos scaling
+    # -----------------------------
+
+    resolution = (
+        output.get("resolution") or ""
+    )
+
+    if resolution:
+
+        filters.append(
+            f"scale={resolution}:"
+            "flags=lanczos"
+        )
+
+    return filters
 
 def build_ffmpeg_command(channel, output):
+        video_filters = build_video_filters(output)
     source = channel["source"]
     mode = output.get("mode", "transcode")
 
@@ -140,6 +319,12 @@ def build_ffmpeg_command(channel, output):
     else:
 
         codec = output.get("video_codec") or DEFAULT_VIDEO_CODEC
+
+if video_filters:
+            cmd += [
+                "-vf",
+                ",".join(video_filters)
+            ]
 
         cmd += [
             "-c:v",
@@ -385,4 +570,3 @@ def probe(source):
         return {
             "error": str(exc)
         }
-PY
