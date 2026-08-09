@@ -109,7 +109,25 @@ function outputEditor(o){
    <div class="grid2">
     <div class="field"><label>اسم Output</label><input id="oName_${o.id}" value="${esc(o.name)}"></div>
     <div class="field"><label>المنصة</label><select id="oProtocol_${o.id}">${['rtmp','rtmps','srt','mpegts'].map(x=>`<option ${x===o.protocol?'selected':''}>${x}</option>`).join('')}</select></div>
-    <div class="field"><label>Server</label><select id="oServer_${o.id}">${serverOptions(o.server)}</select></div>
+    <div class="field">
+    <label>Server</label>
+
+    <select id="oServerType_${o.id}" onchange="changeServerType('${o.id}', '${esc(o.server || '')}')">
+        <option value="telegram" ${o.server === 'rtmps://dc4-1.rtmp.t.me/s/' ? 'selected' : ''}>
+            Telegram RTMPS
+        </option>
+        <option value="custom" ${o.server && o.server !== 'rtmps://dc4-1.rtmp.t.me/s/' ? 'selected' : ''}>
+            Custom RTMP
+        </option>
+    </select>
+
+    <input
+        id="oServer_${o.id}"
+        value="${esc(o.server || 'rtmps://dc4-1.rtmp.t.me/s/')}"
+        placeholder="rtmp://example.com/live"
+        style="margin-top:8px; display:${o.server && o.server !== 'rtmps://dc4-1.rtmp.t.me/s/' ? 'block' : 'none'};"
+    >
+</div>
     <div class="field"><label>Stream Key</label><input id="oKey_${o.id}" type="password" value="${esc(o.stream_key||'')}" placeholder="أدخل المفتاح"></div>
     <div class="field"><label>طريقة البث</label><select id="oMode_${o.id}">${[['copy','COPY - بدون معالجة'],['audio_copy','Video COPY + Audio'],['transcode','تحسين / معالجة']].map(x=>`<option value="${x[0]}" ${x[0]===o.mode?'selected':''}>${x[1]}</option>`).join('')}</select></div>
     <div class="field"><label>جودة جاهزة</label><select id="oQuality_${o.id}">
@@ -154,10 +172,54 @@ function outputEditor(o){
  </div>`;
 }
 function serverOptions(current){
- const opts=['rtmp://example.com/live','rtmps://example.com/live','srt://example.com:9000'];
- if(current && !opts.includes(current)) opts.unshift(current);
- return opts.map(x=>`<option ${x===current?'selected':''}>${esc(x)}</option>`).join('');
+
+    const telegram = 'rtmps://dc4-1.rtmp.t.me/s/';
+
+    const opts = [
+        telegram,
+        'Custom RTMP'
+    ];
+
+    // إذا السيرفر الحالي رابط مخصص، نخليه يظهر كـ Custom RTMP
+    const isCustom = current && current !== telegram;
+
+    return opts.map(x => {
+        if (x === 'Custom RTMP') {
+            return `<option value="custom" ${isCustom ? 'selected' : ''}>Custom RTMP</option>`;
+        }
+
+        return `<option value="${esc(x)}" ${!isCustom && x === current ? 'selected' : ''}>Telegram RTMPS</option>`;
+    }).join('');
+
 }
+
+function changeServerType(id, currentServer = '') {
+
+    const type = document.getElementById(`oServerType_${id}`);
+    const input = document.getElementById(`oServer_${id}`);
+
+    if (!type || !input) return;
+
+    if (type.value === 'telegram') {
+
+        input.value = 'rtmps://dc4-1.rtmp.t.me/s/';
+        input.style.display = 'none';
+
+    } else {
+
+        input.style.display = 'block';
+
+        if (
+            !currentServer ||
+            currentServer === 'rtmps://dc4-1.rtmp.t.me/s/'
+        ) {
+            input.value = '';
+        }
+
+        input.focus();
+    }
+}
+
 function rangeVal(el){el.nextElementSibling.value=el.value}
 function openChannelModal(){editingChannel=null;$('modalTitle').textContent='قناة جديدة';$('modalBody').innerHTML=channelForm();$('modal').classList.remove('hidden');bindLogo()}
 function closeModal(){$('modal').classList.add('hidden')}
